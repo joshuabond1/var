@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ref Cam</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+/* ================================================================
+   TOKENS
+================================================================ */
+:root {
+  --c-void:      #080c14;
+  --c-surface:   #0e1520;
+  --c-card:      #111927;
+  --c-border:    #1d2d42;
+  --c-border-2:  #243448;
+
+  --c-home:      #c0392b;
+  --c-home-dim:  #7a2318;
+  --c-away:      #2980b9;
+  --c-away-dim:  #1a5276;
+
+  --c-white:     #ffffff;
+  --c-muted:     #6b839e;
+  --c-faint:     #3a4e64;
+
+  --c-live:      #27ae60;
+  --c-dead:      #2980b9;
+  --c-warn:      #e67e22;
+  --c-foul:      #c0392b;
+  --c-goal:      #f1c40f;
+  --c-var:       #00bcd4;
+
+  --font:        'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --mono:        'Courier New', Courier, monospace;
+  --radius-sm:   4px;
+  --radius:      8px;
+  --radius-lg:   12px;
+}
+
+/* ================================================================
+   RESET
+================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  background: var(--c-void);
+  color: var(--c-white);
+  font-family: var(--font);
+  display: grid;
+  grid-template-rows: 52px 1fr;
+}
+
+/* ================================================================
+   TOP BAR
+================================================================ */
+#topbar {
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-border);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 20px;
+  position: relative;
+  z-index: 100;
+}
+
+/* Left — branding */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-mark {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--c-foul);
+  box-shadow: 0 0 6px var(--c-foul);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+.brand-text {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+/* Centre — scoreboard */
+#scoreboard {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.team-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+}
+.team-block.home { flex-direction: row-reverse; }
+.team-block.away { flex-direction: row; }
+.team-colour {
+  width: 3px;
+  height: 28px;
+  border-radius: 2px;
+}
+.team-colour.home { background: var(--c-home); }
+.team-colour.away { background: var(--c-away); }
+.team-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.score-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-left: 1px solid var(--c-border);
+  border-right: 1px solid var(--c-border);
+}
+.score-digit {
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: var(--c-white);
+  min-width: 28px;
+  text-align: center;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.score-sep {
+  font-size: 1.1rem;
+  color: var(--c-faint);
+  font-weight: 300;
+  letter-spacing: 0.05em;
+}
+
+/* Right — clock + phase */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+#match-clock {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-muted);
+  font-family: var(--mono);
+}
+#phase-chip {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  transition: background 0.3s, color 0.3s;
+}
+#phase-chip.live      { background: #0d3320; color: var(--c-live); border: 1px solid #1a5e3a; }
+#phase-chip.dead_ball { background: #0a2035; color: var(--c-dead); border: 1px solid #1a4060; }
+#phase-chip.kickoff   { background: #2d1e00; color: var(--c-warn); border: 1px solid #5a3c00; }
+
+/* ================================================================
+   LAYOUT
+================================================================ */
+#layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 10px;
+  padding: 10px;
+  overflow: hidden;
+}
+
+/* ================================================================
+   VIDEO
+================================================================ */
+#video-wrap {
+  position: relative;
+  background: #000;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+}
+#live-feed, #var-feed {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+#var-feed {
+  display: none;
+  position: absolute;
+  inset: 0;
+}
+
+/* VAR border */
+#video-wrap.var-active {
+  box-shadow: 0 0 0 2px var(--c-var), 0 0 40px rgba(0,188,212,0.2);
+}
+
+/* Event banner — slides down from top of video */
+#event-banner {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  padding: 14px 24px 12px;
+  transform: translateY(-100%);
+  transition: transform 0.22s cubic-bezier(0.22,1,0.36,1);
+  z-index: 50;
+  text-align: center;
+}
+#event-banner.show { transform: translateY(0); }
+#event-banner .banner-type {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  display: block;
+  margin-bottom: 3px;
+}
+#event-banner .banner-main {
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: block;
+  line-height: 1;
+}
+#event-banner.foul  { background: rgba(192,57,43,0.95); }
+#event-banner.goal  { background: rgba(22,88,44,0.95); border-bottom: 2px solid var(--c-goal); }
+#event-banner.var   { background: rgba(0,100,120,0.95); }
+#event-banner.pass  { background: rgba(14,21,32,0.92); border-bottom: 1px solid var(--c-border); }
+#event-banner.reset { background: rgba(25,50,80,0.92); border-bottom: 1px solid var(--c-border); }
+
+/* Pass counter strip at bottom of video */
+#pass-strip {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: linear-gradient(transparent, rgba(8,12,20,0.85));
+  padding: 20px 20px 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+.pass-strip-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+  line-height: 1;
+  padding-bottom: 2px;
+}
+.pass-pips {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.pip {
+  width: 26px; height: 5px;
+  border-radius: 3px;
+  background: var(--c-border-2);
+  transition: background 0.25s, box-shadow 0.25s;
+}
+.pip.done {
+  background: var(--c-live);
+  box-shadow: 0 0 6px rgba(39,174,96,0.5);
+}
+.pip.locked {
+  background: var(--c-dead);
+  box-shadow: 0 0 6px rgba(41,128,185,0.4);
+}
+.pass-count-text {
+  font-size: 0.58rem;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 2px;
+}
+
+/* VAR label in video */
+#var-label {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 3.5rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: var(--c-var);
+  text-shadow: 0 0 40px rgba(0,188,212,0.6);
+  display: none;
+  pointer-events: none;
+}
+#video-wrap.var-active #var-label { display: block; }
+
+/* ================================================================
+   SIDE PANEL
+================================================================ */
+#side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* --- Card --- */
+.card {
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+.card-label {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--c-faint);
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* --- Team roster --- */
+.team-section { margin-bottom: 8px; }
+.team-section:last-child { margin-bottom: 0; }
+.team-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.team-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.team-dot.home { background: var(--c-home); }
+.team-dot.away { background: var(--c-away); }
+.team-section-name {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.player-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 20px;
+}
+.player-chip {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  transition: all 0.2s;
+}
+.player-chip.home { background: var(--c-home-dim); color: #e88; border: 1px solid var(--c-home); }
+.player-chip.away { background: var(--c-away-dim); color: #8af; border: 1px solid var(--c-away); }
+.player-chip.active { box-shadow: 0 0 8px rgba(255,255,255,0.3); }
+
+/* --- Commentary --- */
+#commentary-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#commentary-scroll .card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#commentary-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+#commentary-list::-webkit-scrollbar { width: 3px; }
+#commentary-list::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+
+.comment-item {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border);
+  animation: slide-in 0.2s ease-out;
+}
+.comment-item:last-child { border-bottom: none; }
+.comment-time {
+  font-size: 0.55rem;
+  color: var(--c-faint);
+  font-family: var(--mono);
+  margin-bottom: 2px;
+  display: block;
+}
+.comment-text {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--c-muted);
+}
+.comment-item.latest .comment-text { color: var(--c-white); }
+
+/* --- Override panel --- */
+#override-panel {
+  flex-shrink: 0;
+}
+.override-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.override-header .card-label { margin-bottom: 0; }
+.override-toggle {
+  font-size: 0.55rem;
+  color: var(--c-faint);
+  letter-spacing: 0.1em;
+  transition: transform 0.2s;
+}
+.override-toggle.open { transform: rotate(180deg); }
+#override-body {
+  display: none;
+  margin-top: 10px;
+}
+#override-body.open { display: block; }
+
+.override-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.ov-btn {
+  padding: 7px 6px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-sm);
+  color: var(--c-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.ov-btn:hover { background: var(--c-border); color: var(--c-white); border-color: var(--c-border-2); }
+.ov-btn.danger:hover { background: rgba(192,57,43,0.3); border-color: var(--c-foul); color: #e88; }
+.ov-btn.var-btn { grid-column: 1 / -1; }
+.ov-btn.var-btn.active { background: rgba(0,188,212,0.2); border-color: var(--c-var); color: var(--c-var); }
+
+/* ================================================================
+   ANIMATIONS
+================================================================ */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--c-foul); }
+  50%       { opacity: 0.3; box-shadow: none; }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes goal-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(241,196,15,0.5); }
+  70%  { box-shadow: 0 0 0 20px rgba(241,196,15,0); }
+  100% { box-shadow: 0 0 0 0 rgba(241,196,15,0); }
+}
+.goal-ring { animation: goal-pulse 0.7s ease-out 3; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     TOP BAR
+============================================================ -->
+<div id="topbar">
+
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <span class="brand-text">Autonomous Referee</span>
+  </div>
+
+  <div id="scoreboard">
+    <div class="team-block home">
+      <div class="team-colour home"></div>
+      <span class="team-name">Home</span>
+    </div>
+
+    <div class="score-block">
+      <span class="score-digit" id="score-home">0</span>
+      <span class="score-sep">—</span>
+      <span class="score-digit" id="score-away">0</span>
+    </div>
+
+    <div class="team-block away">
+      <div class="team-colour away"></div>
+      <span class="team-name">Away</span>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <span id="match-clock">00:00</span>
+    <span id="phase-chip" class="dead_ball">Dead Ball</span>
+  </div>
+
+</div>
+
+<!-- ============================================================
+     MAIN LAYOUT
+============================================================ -->
+<div id="layout">
+
+  <!-- VIDEO -->
+  <div id="video-wrap">
+    <img id="live-feed" src="/video_feed" alt="Live feed">
+    <img id="var-feed"  src="" alt="VAR replay">
+    <div id="var-label">VAR</div>
+
+    <!-- Event banner (slides in from top) -->
+    <div id="event-banner">
+      <span class="banner-type" id="banner-type"></span>
+      <span class="banner-main" id="banner-main"></span>
+    </div>
+
+    <!-- Pass counter strip -->
+    <div id="pass-strip">
+      <span class="pass-strip-label">Passes required</span>
+      <div class="pass-pips">
+        <div class="pip" id="pip-1"></div>
+        <div class="pip" id="pip-2"></div>
+        <div class="pip" id="pip-3"></div>
+      </div>
+      <span class="pass-count-text" id="pass-count-text">0 / 3</span>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div id="side">
+
+    <!-- Teams -->
+    <div class="card">
+      <span class="card-label">Team Detection</span>
+
+      <div class="team-section">
+        <div class="team-section-header">
+          <div class="team-dot home"></div>
+          <span class="team-section-name">Home</span>
+        </div>
+        <div class="player-chips" id="chips-home">
+          <span style="font-size:0.6rem;color:var(--c-faint)">Detecting shirts...</span>
+        </div>
+      </div>
+
+      <div class="team-section">
+        <div class="team-section-header">
+          <div class="team-dot away"></div>
+          <span class="team-section-name">Away</span>
+        </div>
+        <div class="player-chips" id="chips-away">
+          <span style="font-size:0.6rem;color:var(--c-faint)">Detecting shirts...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Commentary -->
+    <div id="commentary-scroll" style="flex:1;min-height:0;overflow:hidden;">
+      <div class="card" style="height:100%;display:flex;flex-direction:column;">
+        <span class="card-label">Match Feed</span>
+        <ul id="commentary-list"></ul>
+      </div>
+    </div>
+
+    <!-- Override panel -->
+    <div class="card" id="override-panel">
+      <div class="override-header" onclick="toggleOverride()">
+        <span class="card-label">Referee Override</span>
+        <span class="override-toggle" id="override-toggle">&#9660;</span>
+      </div>
+
+      <div id="override-body">
+        <div class="override-grid">
+          <button class="ov-btn" onclick="post('override/keeper_pickup')">Keeper Pickup</button>
+          <button class="ov-btn" onclick="post('override/dead_ball')">Dead Ball</button>
+          <button class="ov-btn" onclick="post('override/goal/0')">Goal — Home End</button>
+          <button class="ov-btn" onclick="post('override/goal/1')">Goal — Away End</button>
+          <button class="ov-btn danger" onclick="post('override/disallow_goal')">Disallow Goal</button>
+          <button class="ov-btn var-btn" id="var-btn" onclick="toggleVar()">VAR Review</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ================================================================
+// Socket.IO
+// ================================================================
+const socket = io();
+let varActive = false;
+const clockStart = Date.now();
+
+setInterval(() => {
+  const s = Math.floor((Date.now() - clockStart) / 1000);
+  document.getElementById('match-clock').textContent =
+    String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}, 500);
+
+
+// ---- State -------------------------------------------------------
+socket.on('game_state', s => {
+  setScore(s.score);
+  setPhase(s.phase);
+  setPasses(s.pass_count, s.required_passes, s.phase);
+  setTeams(s.team_of, s.current_possessor);
+  renderCommentary(s.commentary);
+  varActive = s.var_active;
+  refreshVarUI();
+});
+
+// ---- Goal --------------------------------------------------------
+socket.on('goal', d => {
+  showBanner('goal', 'Goal Confirmed', `${d.score.home}  —  ${d.score.away}`, 4000);
+  document.getElementById('video-wrap').classList.add('goal-ring');
+  setTimeout(() => document.getElementById('video-wrap').classList.remove('goal-ring'), 2500);
+  push(d.message);
+});
+
+socket.on('goal_disallowed', d => {
+  showBanner('foul', 'Goal Disallowed', 'Referee override', 3000);
+  push(d.message);
+});
+
+// ---- Foul --------------------------------------------------------
+socket.on('foul', d => {
+  const sub = d.reason === 'foul_first_time' ? 'Ball controlled — first touch only'
+            : d.reason === 'foul_3pass'       ? `Only ${d.pass_count||0}/3 passes from dead ball`
+            : 'Rule violation';
+  showBanner('foul', 'Foul', sub, 3500);
+  push(d.message);
+});
+
+// ---- Dead ball / keeper ------------------------------------------
+socket.on('dead_ball_event', d => {
+  const sub = d.trigger === 'keeper_pickup' ? 'Keeper holding ball' : 'Ball out of play';
+  showBanner('reset', 'Dead Ball', sub, 2500);
+  push(d.message);
+});
+
+// ---- Pass --------------------------------------------------------
+socket.on('pass_event', d => {
+  if (d.phase === 'dead_ball') {
+    showBanner('pass', 'Pass Recorded', `${d.pass_count} of ${d.required} required`, 1400);
+  }
+});
+
+// ---- VAR ---------------------------------------------------------
+socket.on('var_start', d => { varActive = true;  refreshVarUI(); push(d.message); });
+socket.on('var_end',   d => { varActive = false; refreshVarUI(); push(d.message || 'VAR complete.'); });
+
+
+// ================================================================
+// DOM helpers
+// ================================================================
+function setScore(s) {
+  document.getElementById('score-home').textContent = s.home;
+  document.getElementById('score-away').textContent = s.away;
+}
+
+const PHASE_LABELS = { live: 'Live', dead_ball: 'Dead Ball', kickoff: 'Kickoff' };
+function setPhase(phase) {
+  const el = document.getElementById('phase-chip');
+  el.className = phase;
+  el.textContent = PHASE_LABELS[phase] || phase;
+}
+
+function setPasses(n, req, phase) {
+  document.getElementById('pass-count-text').textContent = `${n} / ${req}`;
+  const live = phase === 'live';
+  for (let i = 1; i <= 3; i++) {
+    const pip = document.getElementById('pip-' + i);
+    pip.className = 'pip' + (i <= n ? (live ? ' done' : ' locked') : '');
+  }
+}
+
+function setTeams(teamOf, possessorId) {
+  const home = [], away = [];
+  Object.entries(teamOf || {}).forEach(([id, team]) => {
+    if (team === 'home') home.push(+id);
+    else if (team === 'away') away.push(+id);
+  });
+
+  const render = (ids, side) => {
+    const el = document.getElementById('chips-' + side);
+    if (ids.length === 0) {
+      el.innerHTML = '<span style="font-size:0.6rem;color:var(--c-faint)">Detecting shirts...</span>';
+      return;
+    }
+    el.innerHTML = ids.map(id => {
+      const active = id === possessorId;
+      return `<span class="player-chip ${side}${active?' active':''}" data-id="${id}">P${id}</span>`;
+    }).join('');
+  };
+  render(home, 'home');
+  render(away, 'away');
+}
+
+// Commentary
+function renderCommentary(lines) {
+  const ul = document.getElementById('commentary-list');
+  ul.innerHTML = '';
+  const reversed = [...lines].reverse();
+  reversed.forEach((c, i) => {
+    const li = document.createElement('li');
+    li.className = 'comment-item' + (i === 0 ? ' latest' : '');
+    li.innerHTML = `<span class="comment-time">${c.time}</span><span class="comment-text">${esc(c.text)}</span>`;
+    ul.appendChild(li);
+  });
+}
+
+function push(text) {
+  const ul = document.getElementById('commentary-list');
+  const li = document.createElement('li');
+  li.className = 'comment-item latest';
+  li.innerHTML = `<span class="comment-time">${now()}</span><span class="comment-text">${esc(text)}</span>`;
+  ul.insertBefore(li, ul.firstChild);
+  // Un-latest previous
+  [...ul.querySelectorAll('.comment-item')].slice(1).forEach(el => el.classList.remove('latest'));
+  while (ul.children.length > 40) ul.removeChild(ul.lastChild);
+}
+
+// Event banner
+let _bannerTimer = null;
+function showBanner(type, label, main, ms) {
+  if (_bannerTimer) clearTimeout(_bannerTimer);
+  const banner = document.getElementById('event-banner');
+  document.getElementById('banner-type').textContent = label;
+  document.getElementById('banner-main').textContent = main;
+  banner.className = type;
+  void banner.offsetWidth;
+  banner.classList.add('show');
+  _bannerTimer = setTimeout(() => banner.classList.remove('show'), ms);
+}
+
+// VAR
+function refreshVarUI() {
+  const wrap     = document.getElementById('video-wrap');
+  const btn      = document.getElementById('var-btn');
+  const varFeed  = document.getElementById('var-feed');
+  const liveFeed = document.getElementById('live-feed');
+
+  if (varActive) {
+    wrap.classList.add('var-active');
+    btn.classList.add('active');
+    btn.textContent = 'Cancel VAR';
+    varFeed.src = '/var_feed?' + Date.now();
+    varFeed.style.display = 'block';
+    liveFeed.style.opacity = '0.08';
+    showBanner('var', 'VAR Review', 'Checking decision', 99999);
+  } else {
+    wrap.classList.remove('var-active');
+    btn.classList.remove('active');
+    btn.textContent = 'VAR Review';
+    varFeed.style.display = 'none';
+    varFeed.src = '';
+    liveFeed.style.opacity = '1';
+    const banner = document.getElementById('event-banner');
+    if (banner.classList.contains('var')) banner.classList.remove('show');
+  }
+}
+
+
+// ================================================================
+// API calls
+// ================================================================
+async function post(endpoint) {
+  try { await fetch(`/api/${endpoint}`, { method: 'POST' }); }
+  catch(e) { console.error(e); }
+}
+
+function toggleVar() {
+  post(varActive ? 'var/cancel' : 'var/start');
+}
+
+function toggleOverride() {
+  const body    = document.getElementById('override-body');
+  const toggle  = document.getElementById('override-toggle');
+  const open    = body.classList.toggle('open');
+  toggle.classList.toggle('open', open);
+}
+
+
+// ================================================================
+// Utility
+// ================================================================
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function now() {
+  return new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// Initial state fetch
+fetch('/api/state').then(r=>r.json()).then(s => {
+  setScore(s.score);
+  setPhase(s.phase);
+  setPasses(s.pass_count, s.required_passes, s.phase);
+  renderCommentary(s.commentary);
+});
+</script>
+</body>
+</html>
