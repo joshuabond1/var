@@ -15,6 +15,8 @@ Environment variables (set in Railway dashboard):
     PORT           Set automatically by Railway — do not set manually
 """
 
+from gevent import monkey; monkey.patch_all()
+
 import os
 import time
 import threading
@@ -27,7 +29,7 @@ from flask_socketio import SocketIO, emit, join_room
 # ---------------------------------------------------------------------------
 app = Flask(__name__, template_folder="templates")
 app.config["SECRET_KEY"] = os.environ.get("RELAY_SECRET", "garden-referee-relay")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 RELAY_SECRET = os.environ.get("RELAY_SECRET", "")
 
@@ -248,4 +250,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"[Relay] Running on port {port}")
     socketio.run(app, host="0.0.0.0", port=port,
-                 debug=False, use_reloader=False)
+                 debug=False, use_reloader=False,
+                 allow_unsafe_werkzeug=True)
